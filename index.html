@@ -41,9 +41,28 @@
         <section class="card task-manager">
             <h2>My Tasks</h2>
             <div class="task-input-container">
-                <input type="text" id="task-input" placeholder="Ready to crush your next goal?">
-                <button id="add-task-btn">Add Task</button>
+                <div class="task-inputs">
+                    <input type="text" id="task-input" placeholder="Ready to crush your next goal?">
+                    <input type="text" id="task-desc" placeholder="Enter description " />
+                    <input type="text" id="task-tags" placeholder="Enter tags " />
+                </div>
+                <div class="add-row">
+                    <button id="add-task-btn">Add Task</button>
+                </div>
             </div>
+
+            <div class="task-search-container">
+                <input type="text" id="task-search" placeholder="Search tasks... ">
+                <div class="search-row">
+                    <button id="search-btn">Search</button>
+                    <button id="clear-search-btn">Clear</button>
+                    <span id="search-count"></span>
+                </div>
+            </div>
+
+            <hr class="search-divider" />
+            <h3 class="tasks-heading">Task List</h3>
+
             <div class="task-filters">
                 <button class="filter-btn active" data-filter="all">All</button>
                 <button class="filter-btn" data-filter="active">Active</button>

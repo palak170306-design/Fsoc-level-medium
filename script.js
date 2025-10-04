@@ -1,10 +1,14 @@
 document.addEventListener("DOMContentLoaded", () => {
   const taskInput = document.getElementById("task-input");
+  const taskDescInput = document.getElementById("task-desc");
+  const taskTagsInput = document.getElementById("task-tags");
   const addTaskBtn = document.getElementById("add-task-btn");
   const taskList = document.getElementById("task-list");
   const clearAllBtn = document.getElementById("clear-all-btn");
   const filterBtns = document.querySelectorAll(".filter-btn");
-
+  const taskSearch = document.getElementById("task-search");   
+  const clearSearchBtn = document.getElementById("clear-search-btn"); 
+  const searchCount = document.getElementById("search-count");
   const cityInput = document.getElementById("city-input");
   const searchWeatherBtn = document.getElementById("search-weather-btn");
   const weatherInfo = document.getElementById("weather-info");
@@ -13,7 +17,9 @@ document.addEventListener("DOMContentLoaded", () => {
 
   let tasks = JSON.parse(localStorage.getItem("tasks")) || [];
   let currentFilter = "all";
+  let searchQuery ="";
   let weatherSearchTimeout = null;
+  let isSearchActive = false;
 
   const weatherApiKey = "YOUR_API_KEY_HERE";
   const DEBOUNCE_DELAY = 500;
@@ -29,6 +35,12 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem("tasks", JSON.stringify(tasks));
   }
 
+  function highlightMatch(text, query) {
+    if (!query) return text;
+    const regex = new RegExp(`(${query})`, "gi");
+    return text.replace(regex, "<mark>$1</mark>");
+  }
+
   function createTaskElement(task, index) {
     const li = document.createElement("li");
     li.className = "task-item";
@@ -40,9 +52,29 @@ document.addEventListener("DOMContentLoaded", () => {
     checkbox.dataset.action = "toggle";
 
     const taskText = document.createElement("span");
-    taskText.textContent = task.text;
+    taskText.innerHTML = searchQuery ? highlightMatch(task.text, searchQuery) : task.text;
     if (task.completed) taskText.classList.add("completed");
     taskText.dataset.action = "edit";
+
+    const desc = document.createElement("p");
+    desc.className = "task-desc";
+    const descText = task.description ? `(${task.description})` : "";
+    desc.innerHTML = searchQuery
+      ? highlightMatch(descText, searchQuery)
+      : descText;
+
+
+    const tagsDiv = document.createElement("div");
+    tagsDiv.className = "task-tags";
+    const safeTags = Array.isArray(task.tags) ? task.tags : (task.tags ? [task.tags] : []);
+    safeTags.forEach(tag => {
+      const tagEl = document.createElement("span");
+      tagEl.className = "task-tag";
+      tagEl.innerHTML = searchQuery
+    ? highlightMatch(`#${tag}`, searchQuery)
+    : `#${tag}`;
+      tagsDiv.appendChild(tagEl);
+    });
 
     const deleteBtn = document.createElement("button");
     deleteBtn.className = "delete-btn";
@@ -51,30 +83,47 @@ document.addEventListener("DOMContentLoaded", () => {
 
     li.appendChild(checkbox);
     li.appendChild(taskText);
+    li.appendChild(desc);
+    li.appendChild(tagsDiv);
     li.appendChild(deleteBtn);
     return li;
   }
 
   function renderTasks() {
-    incompleteTasks = [];
-    completedTasks = [];
-        tasks.forEach((task,index)=>{
-            if (task.completed){
-                completedTasks.push(task)
-            }
-            else{
-                incompleteTasks.push(task)
-            }
-        })
-        tasks = [];
-        tasks = [...incompleteTasks,...completedTasks]
     taskList.innerHTML = "";
+    let incompleteTasks = [];
+    let completedTasks = [];
+    tasks.forEach((task) => {
+      if (task.completed) completedTasks.push(task);
+      else incompleteTasks.push(task);
+    });
 
-    const filteredTasks = tasks.filter((task) => {
+    const sortedTasks = [...incompleteTasks, ...completedTasks];
+
+    
+    const matchPredicate = (task) => {
+      if (!searchQuery) return false;
+      const q = searchQuery.toLowerCase();
+      return (
+        (task.text && task.text.toLowerCase().includes(q)) ||
+        (task.description && task.description.toLowerCase().includes(q)) ||
+        (task.tags && task.tags.some(tag => tag.toLowerCase().includes(q)))
+      );
+    };
+
+    
+    const matchedTasks = searchQuery ? sortedTasks.filter(matchPredicate) : [];
+    if (searchCount) searchCount.textContent = searchQuery ? `${matchedTasks.length} match(es)` : "";
+
+    
+    let filteredByFilter = sortedTasks.filter((task) => {
       if (currentFilter === "active") return !task.completed;
       if (currentFilter === "completed") return task.completed;
       return true;
     });
+
+    
+    const filteredTasks = isSearchActive && searchQuery ? filteredByFilter.filter(matchPredicate) : filteredByFilter;
 
     if (filteredTasks.length === 0) {
       const empty = document.createElement("li");
@@ -85,28 +134,30 @@ document.addEventListener("DOMContentLoaded", () => {
       return;
     }
 
-    function addTask() {
-        const text = taskInput.value.trim();
-        // Removing the White Spaces around the text (excluding the middle one)
-        if (text) {
-            tasks.push({ text: text, completed: false });
-            // Checking if text is not Clear String.
-            renderTasks();
-            taskInput.value = "";
-        }
-    }
+    
     filteredTasks.forEach((task) => {
       const originalIndex = tasks.findIndex((t) => t === task);
       const taskElement = createTaskElement(task, originalIndex);
+
       taskList.appendChild(taskElement);
     });
   }
 
   function addTask() {
     const text = taskInput.value.trim();
+    const description = taskDescInput.value.trim();
+    const tags = taskTagsInput.value
+      .split(",")
+      .map(tag => tag.trim())
+      .filter(tag => tag.length > 0);
+
     if (!text) return;
 
-    const newTask = { text, completed: false };
+    const newTask = {
+      text,
+      description,
+      tags, 
+      completed: false };
     tasks.push(newTask);
 
     if (currentFilter === "all" || currentFilter === "active") {
@@ -120,6 +171,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
     saveTasks();
     taskInput.value = "";
+    taskDescInput.value = "";
+    taskTagsInput.value = "";
   }
 
   function deleteTask(index) {
@@ -267,22 +320,49 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
-  cityInput.addEventListener("input", () =>
-    debouncedFetchWeather(cityInput.value.trim())
-  );
-  searchWeatherBtn.addEventListener("click", () => {
-    clearTimeout(weatherSearchTimeout);
-    fetchWeather(cityInput.value.trim());
+  taskSearch.addEventListener("input", () => {
+    searchQuery = taskSearch.value.trim();
+    isSearchActive = false;
+    renderTasks();
   });
-  cityInput.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") {
+
+  clearSearchBtn.addEventListener("click", () => {
+    taskSearch.value = "";
+    searchQuery = "";
+    isSearchActive = false;
+    if (searchCount) searchCount.textContent = "";
+    renderTasks();
+    taskSearch.focus();
+  });
+
+  
+  if (cityInput) {
+    cityInput.addEventListener("input", () =>
+      debouncedFetchWeather(cityInput.value.trim())
+    );
+    cityInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        clearTimeout(weatherSearchTimeout);
+        fetchWeather(cityInput.value.trim());
+      }
+    });
+  }
+  if (searchWeatherBtn && cityInput) {
+    searchWeatherBtn.addEventListener("click", () => {
       clearTimeout(weatherSearchTimeout);
       fetchWeather(cityInput.value.trim());
-    }
-  });
+    });
+  }
 
   themeToggle.addEventListener("click", () => {
     document.body.classList.toggle("dark-theme");
+  });
+
+  document.addEventListener("keydown", (e) => {
+    if (e.ctrlKey && e.key.toLowerCase() === "f") {
+      e.preventDefault();
+      taskSearch.focus();
+    }
   });
 
   const navLinks = document.querySelectorAll(".nav-link");
@@ -293,7 +373,29 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   });
 
+  const searchBtn = document.getElementById("search-btn"); 
+  if (searchBtn) {
+    searchBtn.addEventListener("click", () => {
+      searchQuery = taskSearch.value.trim();
+      isSearchActive = true; 
+      renderTasks();
+    });
+  }
+
   function init() {
+    tasks = JSON.parse(localStorage.getItem("tasks")) || [];
+    tasks = tasks.map(t => {
+      if (!t) return { text: "", description: "", tags: [], completed: false };
+      if (typeof t === 'string') return { text: t, description: "", tags: [], completed: false };
+      return {
+        text: t.text || "",
+        description: t.description || "",
+        tags: Array.isArray(t.tags) ? t.tags : (t.tags ? [t.tags] : []),
+        completed: !!t.completed
+      };
+    });
+    isSearchActive = false;
+    searchQuery = "";
     renderTasks();
     if (yearSpan) yearSpan.textContent = new Date().getFullYear();
     fetchWeather("London");
