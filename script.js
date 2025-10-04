@@ -4,6 +4,11 @@ document.addEventListener("DOMContentLoaded", () => {
   const dueDateInput = document.getElementById("due-date-input"); // NEW
   const addTaskBtn = document.getElementById("add-task-btn");
   const taskList = document.getElementById("task-list");
+  const taskDescInput = document.getElementById("task-desc");
+  const taskSearch = document.getElementById("task-search");
+  const searchBtn = document.getElementById("search-btn");
+  const clearSearchBtn = document.getElementById("clear-search-btn");
+  const searchCount = document.getElementById("search-count");
   const clearAllBtn = document.getElementById("clear-all-btn");
   const filterBtns = document.querySelectorAll(".filter-btn");
   const sortTasksBtn = document.getElementById("sort-tasks-btn");
@@ -17,6 +22,26 @@ document.addEventListener("DOMContentLoaded", () => {
   const yearSpan = document.getElementById("year");
 
   let tasks = JSON.parse(localStorage.getItem("tasks")) || [];
+
+  // Normalize persisted tasks to ensure required fields exist
+  function normalizeTasks() {
+    tasks = tasks.map((t) => {
+      const text = (t && t.text) ? String(t.text) : "";
+      const description = (t && typeof t.description === 'string') ? t.description : "";
+      const tags = [];
+      return {
+        text,
+    description,
+    tags,
+        completed: !!(t && t.completed),
+        created: t && t.created ? t.created : Date.now(),
+        priority: t && typeof t.priority === 'number' ? t.priority : 2,
+        dueDate: t && t.dueDate ? t.dueDate : null
+      };
+    });
+    saveTasks();
+  }
+  normalizeTasks();
   let currentFilter = "all";
   let weatherSearchTimeout = null;
 
@@ -44,6 +69,45 @@ document.addEventListener("DOMContentLoaded", () => {
     localStorage.setItem("tasks", JSON.stringify(tasks));
   }
 
+  function escRegex(s) {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function highlightMatch(text, query) {
+    if (!query) return text;
+    const r = new RegExp(`(${escRegex(query)})`, "gi");
+    return text.replace(r, "<mark>$1</mark>");
+  }
+
+  function levenshtein(a, b) {
+    const al = a.length, bl = b.length;
+    if (!al) return bl;
+    if (!bl) return al;
+    const v0 = Array.from({ length: bl + 1 }, (_, i) => i);
+    const v1 = new Array(bl + 1);
+    for (let i = 1; i <= al; i++) {
+      v1[0] = i;
+      for (let j = 1; j <= bl; j++) {
+        const cost = a[i - 1].toLowerCase() === b[j - 1].toLowerCase() ? 0 : 1;
+        v1[j] = Math.min(v1[j - 1] + 1, v0[j] + 1, v0[j - 1] + cost);
+      }
+      for (let j = 0; j <= bl; j++) v0[j] = v1[j];
+    }
+    return v1[bl];
+  }
+
+  function fuzzyMatch(text, query) {
+    if (!query) return false;
+    const t = (text || "").toLowerCase();
+    const q = query.toLowerCase();
+    // avoid fuzzy matching very short queries to reduce noise
+    if (q.length <= 1) return t.includes(q);
+    if (t.includes(q)) return true;
+    // make threshold slightly stricter for longer queries
+    const threshold = Math.max(1, Math.floor(q.length * 0.28));
+    return levenshtein(t, q) <= threshold;
+  }
+
   function saveSortState() {
     localStorage.setItem("sortState", JSON.stringify(sortState));
   }
@@ -56,6 +120,8 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!text) return;
     const newTask = {
       text,
+      description: taskDescInput ? taskDescInput.value.trim() : "",
+      tags: [],
       completed: false,
       created: Date.now(),
       priority: 2, // default priority: 1=High, 2=Medium, 3=Low
@@ -64,7 +130,8 @@ document.addEventListener("DOMContentLoaded", () => {
     tasks.push(newTask);
     saveTasks();
     taskInput.value = "";
-    dueDateInput.value = "";
+    if (dueDateInput) dueDateInput.value = "";
+  if (taskDescInput) taskDescInput.value = "";
     renderTasks();
   }
 
@@ -177,6 +244,16 @@ document.addEventListener("DOMContentLoaded", () => {
       return true;
     });
 
+    const q = taskSearch ? taskSearch.value.trim() : "";
+    const matches = q
+      ? filteredTasks.filter((t) =>
+          fuzzyMatch(t.text, q) || fuzzyMatch(t.description, q) || (Array.isArray(t.tags) && t.tags.some(tag => fuzzyMatch(tag, q)))
+        )
+      : [];
+    if (searchCount) searchCount.textContent = q ? `${matches.length} match(es)` : "";
+    
+    if (q && searchBtn && searchBtn.dataset.active === "true") filteredTasks = matches;
+
     // Sorting
     filteredTasks = sortTasks(filteredTasks);
 
@@ -226,7 +303,7 @@ document.addEventListener("DOMContentLoaded", () => {
       li.style.padding = "0.5rem 0.5rem";
       li.style.transition = "background 0.2s";
 
-      // Highlight overdue tasks
+      
       let isOverdue = false;
       if (task.dueDate && !task.completed) {
         const now = new Date();
@@ -244,14 +321,22 @@ document.addEventListener("DOMContentLoaded", () => {
       checkbox.dataset.action = "toggle";
       checkbox.style.marginRight = "0.5rem";
 
-      const taskText = document.createElement("span");
-      taskText.textContent = task.text;
+  const taskText = document.createElement("span");
+  const qval = taskSearch ? taskSearch.value.trim() : "";
+  taskText.innerHTML = qval ? highlightMatch(task.text, qval) : task.text;
       if (task.completed) taskText.classList.add("completed");
       taskText.dataset.action = "edit";
 
       const titleCell = document.createElement("span");
       titleCell.appendChild(checkbox);
       titleCell.appendChild(taskText);
+
+      if (task.description) {
+        const descSpan = document.createElement("span");
+        descSpan.className = "task-desc";
+        descSpan.innerHTML = qval ? highlightMatch(`(${task.description})`, qval) : `(${task.description})`;
+        titleCell.appendChild(descSpan);
+      }
 
       // Date Added
       const dateCell = document.createElement("span");
@@ -448,6 +533,38 @@ document.addEventListener("DOMContentLoaded", () => {
   });
   clearAllBtn.addEventListener("click", clearAllTasks);
 
+  // Search input live update (highlights and counts)
+  if (taskSearch) {
+    taskSearch.addEventListener("input", () => {
+      // typing should only update highlights and count
+      renderTasks();
+    });
+  }
+
+  // Search button toggles filter application
+  if (searchBtn) {
+    searchBtn.addEventListener("click", () => {
+      const isActive = searchBtn.dataset.active === "true";
+      // toggle active state
+      searchBtn.dataset.active = isActive ? "false" : "true";
+      searchBtn.classList.toggle("active", !isActive);
+      renderTasks();
+    });
+  }
+
+  // Clear search resets input and search button state
+  if (clearSearchBtn) {
+    clearSearchBtn.addEventListener("click", () => {
+      if (taskSearch) taskSearch.value = "";
+      if (searchBtn) {
+        searchBtn.dataset.active = "false";
+        searchBtn.classList.remove("active");
+      }
+      if (searchCount) searchCount.textContent = "";
+      renderTasks();
+    });
+  }
+
   filterBtns.forEach((btn) => {
     btn.addEventListener("click", () => {
       filterBtns.forEach((b) => b.classList.remove("active"));
@@ -467,6 +584,19 @@ document.addEventListener("DOMContentLoaded", () => {
       deleteTask(index);
     } else if (e.target.dataset.action === "edit") {
       enableInlineEdit(index, e.target);
+    }
+  });
+
+  // Keyboard shortcut to focus search: Ctrl+F (or Cmd+F on Mac)
+  window.addEventListener("keydown", (e) => {
+    const isMac = navigator.platform.toUpperCase().includes('MAC');
+    const mod = isMac ? e.metaKey : e.ctrlKey;
+    if (mod && e.key.toLowerCase() === 'f') {
+      if (taskSearch) {
+        e.preventDefault();
+        taskSearch.focus();
+        taskSearch.select();
+      }
     }
   });
 
